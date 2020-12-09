@@ -16,6 +16,7 @@ MICROS_ON = 6
 MICROS_OFF = 7
 PROGRAM = 8
 DEBUG = 9
+RAW_ADC = 10
 
 
 class Prompt:
@@ -55,11 +56,16 @@ async def update_loop():
             micros_off = int.from_bytes(data_packet[1:], byteorder='little')
         elif data_packet[0] == PROGRAM:
             pass
-        elif record_file is not None and not record_file.closed:
-            try:
-                print(f'{time.time()}, {running:d}, {cycle_count:d}, {source_voltage:f}, {current1:f}, {current2:f}, {button:d}, {micros_on:d}, {micros_off:d}', file=record_file)
-            except:
-                print('[error] failed to write to csv file')
+        elif data_packet[0] == RAW_ADC:
+            adc_data_len = int.from_bytes(data_packet[1:], byteorder='little')
+            raw_adc_data = ser.read(adc_data_len)
+            adc_data = struct.unpack(f'<{int(adc_data_len/2)}H', raw_adc_data)
+            if record_file is not None and not record_file.closed:
+                try:
+                    print('\n'.join([str(val)
+                                     for val in adc_data]), file=record_file)
+                except:
+                    print('[error] failed to write to csv file')
 
         await asyncio.sleep(0)
 
@@ -70,6 +76,7 @@ async def stop_record(after_seconds):
     if record_file:
         close_file(record_file)
         record_file = None
+        print('recording finished')
 
 
 def close_file(use_file):
@@ -137,9 +144,8 @@ async def main():
         elif command[0].lower() == 'record':
             try:
                 record_file = open(command[1], 'w')
-                print(
-                    'timestamp,running,cycle_count,source_voltage,current1,current2,button,micros_on,micros_off', file=record_file)
-                asyncio.create_task(stop_record(after_seconds=30))
+                print('raw_adc', file=record_file)
+                asyncio.create_task(stop_record(after_seconds=10))
             except:
                 print('[error] failed to open the file for writing')
                 print('command format: record <file path>')
