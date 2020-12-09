@@ -1,8 +1,21 @@
+#!/usr/bin/env python
+
 import serial
 import asyncio
 import sys
 import struct
 import time
+
+RUN = 0
+CYCLE = 1
+VOLTAGE = 2
+CURRENT1 = 3
+CURRENT2 = 4
+BUTTON = 5
+MICROS_ON = 6
+MICROS_OFF = 7
+PROGRAM = 8
+DEBUG = 9
 
 
 class Prompt:
@@ -24,28 +37,24 @@ async def update_loop():
 
     while True:
         data_packet = ser.read(5)
-        if data_packet[0] == 0:
+        if data_packet[0] == RUN:
             running = data_packet[1] == 1
-        elif data_packet[0] == 1:
+        elif data_packet[0] == CYCLE:
             cycle_count = int.from_bytes(data_packet[1:], byteorder='little')
-        elif data_packet[0] == 2:
+        elif data_packet[0] == VOLTAGE:
             source_voltage = struct.unpack('<f', data_packet[1:])[0]
-        elif data_packet[0] == 3:
+        elif data_packet[0] == CURRENT1:
             current1 = struct.unpack('<f', data_packet[1:])[0]
-        elif data_packet[0] == 4:
+        elif data_packet[0] == CURRENT2:
             current2 = struct.unpack('<f', data_packet[1:])[0]
-        elif data_packet[0] == 5:
+        elif data_packet[0] == BUTTON:
             button = data_packet[1] > 0
-        elif data_packet[0] == 6:
+        elif data_packet[0] == MICROS_ON:
             micros_on = int.from_bytes(data_packet[1:], byteorder='little')
-        elif data_packet[0] == 7:
+        elif data_packet[0] == MICROS_OFF:
             micros_off = int.from_bytes(data_packet[1:], byteorder='little')
-        elif data_packet[0] == 9:
-            # sample_count = int.from_bytes(data_packet[1:], byteorder='little')
-            # adc_data_raw = ser.read(sample_count * 2)
-            # adc_data = struct.unpack(f'<{sample_count}H', adc_data_raw)
-            # print(adc_data)
-            print('got packet 9')
+        elif data_packet[0] == PROGRAM:
+            pass
         elif record_file is not None and not record_file.closed:
             try:
                 print(f'{time.time()}, {running:d}, {cycle_count:d}, {source_voltage:f}, {current1:f}, {current2:f}, {button:d}, {micros_on:d}, {micros_off:d}', file=record_file)
@@ -96,15 +105,15 @@ async def main():
         packet = None
 
         if command[0].lower() == 'run':
-            packet = bytes([0, 1, 0, 0, 0])
+            packet = bytes([RUN, 1, 0, 0, 0])
         elif command[0].lower() == 'stop':
-            packet = bytes([0, 0, 0, 0, 0])
+            packet = bytes([RUN, 0, 0, 0, 0])
             if record_file:
                 await stop_record(after_seconds=0)
         elif command[0].lower() == 'cycle':
             try:
                 cycle_stop = int(command[1])
-                packet = struct.pack('<BI', 1, cycle_stop)
+                packet = struct.pack('<BI', CYCLE, cycle_stop)
             except:
                 print('[error] failed to parse an integer from command arguments')
                 print('command format: cycle <number of cycles>')
@@ -114,14 +123,14 @@ async def main():
         elif command[0].lower() == 'on':
             try:
                 on_time = int(command[1])
-                packet = struct.pack('<BI', 6, on_time)
+                packet = struct.pack('<BI', MICROS_ON, on_time)
             except:
                 print('[error] failed to parse an integer from command arguments')
                 print('command format: on <microseconds>')
         elif command[0].lower() == 'off':
             try:
                 off_time = int(command[1])
-                packet = struct.pack('<BI', 7, off_time)
+                packet = struct.pack('<BI', MICROS_OFF, off_time)
             except:
                 print('[error] failed to parse an integer from command arguments')
                 print('command format: off <microseconds>')
@@ -135,8 +144,9 @@ async def main():
                 print('[error] failed to open the file for writing')
                 print('command format: record <file path>')
         elif command[0].lower() == 'program':
-            packet = bytes([9, 1, 0, 0, 0])
-            print(packet)
+            packet = bytes([PROGRAM, 0, 0, 0, 0])
+        elif command[0].lower() == 'debug':
+            packet = bytes([DEBUG, 0, 0, 0, 0])
         elif command[0].lower() == 'quit' or command[0].lower() == 'q':
             if record_file:
                 await stop_record(after_seconds=0)
@@ -163,7 +173,13 @@ help                - show this help menu''')
                 print(f'[error] command packet length is {len(packet)} bytes')
 
 
-ser = serial.Serial(sys.argv[1], 115200, timeout=2)
+ser = None
+try:
+    ser = serial.Serial(sys.argv[1], 115200)
+except:
+    print('Error opening serial port')
+    print('Usage: vo2_client.py /path/to/port')
+    exit()
 
 source_voltage = 0.0
 current1 = 0.0
